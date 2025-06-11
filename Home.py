@@ -23,7 +23,7 @@ custom_event_order = [
 ]
 
 # Sidebar or main page filters
-st.title("Track and Field Odds and Results Dashboard")
+st.title("Track and Field Odds Dashboard")
 
 full_results = pd.read_csv("test_track_meet_results.csv")
 
@@ -76,7 +76,7 @@ full_results2 = pd.read_csv('preProcessed_betting.csv')
 
 full_results = pd.concat([full_results, full_results2], ignore_index=True)
 
-full_results = full_results[['MeetName', 'Event', 'Date', 'Final', 'Name', 'Place']]
+full_results = full_results[['MeetName', 'Event', 'Date', 'Final', 'Name', 'Place', 'AthleteURL']]
 
 full_results['Final'] = full_results['Final'].fillna('Idk')
 
@@ -85,9 +85,28 @@ full_results = full_results.rename(columns={'Date': 'Meet_Date'})
 df['Meet_Date'] = pd.to_datetime(df['Meet_Date'], errors='coerce').dt.date
 full_results['Meet_Date'] = pd.to_datetime(full_results['Meet_Date'], errors='coerce').dt.date
 
+will_df = pd.read_parquet("plackettLuceScores.parquet", engine="pyarrow")
+
+will_df['Date'] = pd.to_datetime(will_df['Date'], errors='coerce').dt.date
+
+will_df = will_df.rename(columns={'Date': 'Meet_Date', 'Athlete': 'AthleteURL'})
+
+will_df['Event'] = will_df['Sex'] + ' ' + will_df['Event']
+
+del will_df['Sex']
+
 df = pd.merge(df, full_results, on=['MeetName', 'Event', 'Final', 'Meet_Date', 'Name'], how='outer')
 
-df = df.loc[df['Meet_Date'] >= pd.to_datetime('2024-12-1').date()].reset_index(drop=True)
+df = df.loc[df['Meet_Date'] >= pd.to_datetime('2024-12-01').date()].reset_index(drop=True)
+
+df = pd.merge(
+    df,
+    will_df,
+    on=['Event', 'Meet_Date', 'AthleteURL'],
+    how='outer'
+)
+
+df.dropna(subset=['Name'], inplace=True)
 
 # Count non-null 'Pre-Race Odds' per (MeetName, Event, Final)
 odds_counts = (
@@ -138,7 +157,7 @@ else:
     filtered_df = sub_df
 
 
-filtered_df = filtered_df[['Place', 'Name', 'American Odds', 'Target_Mark', 'Predicted_Mark']]
+filtered_df = filtered_df[['Place', 'Name', 'American Odds', 'Target_Mark', 'Predicted_Mark', 'Worth']]
 
 filtered_df.rename(columns={
     'Name': 'Athlete Name',
@@ -151,6 +170,35 @@ filtered_df['Place'] = pd.to_numeric(filtered_df['Place'], errors='coerce').asty
 
 filtered_df = filtered_df.set_index("Place").sort_index()
 
+filtered_df['Predicted Place'] = filtered_df['Predicted Time'].rank(method='min').astype('Int64')
+
+filtered_df['Diff'] = (filtered_df['Predicted Place'] - filtered_df.index).abs()
+    
+
 # --- Show Results ---
 st.subheader(f"Results for {selected_meet} - {selected_event}")
-st.dataframe(filtered_df)
+display_df = filtered_df.drop(columns=['Diff'])
+
+# Use the original filtered_df (with 'Diff') in the styling logic
+def highlight_row_trimmed(row):
+    full_row = filtered_df.loc[row.name]  # get original row with 'Diff'
+    if pd.isna(full_row['Diff']):
+        return [''] * display_df.shape[1]
+    if full_row['Diff'] <= 1:
+        return ['background-color: lightgreen'] * display_df.shape[1]
+    elif full_row['Diff'] <= 3:
+        return ['background-color: khaki'] * display_df.shape[1]
+    else:
+        return ['background-color: lightcoral'] * display_df.shape[1]
+
+# Apply formatting
+styled_df = display_df.style\
+    .apply(highlight_row_trimmed, axis=1)\
+    .format({
+        'Pre-Race Odds': '{:.0f}',
+        'Actual Time': '{:.2f}',
+        'Predicted Time': '{:.2f}'
+    })
+
+
+st.dataframe(styled_df, use_container_width=True)
