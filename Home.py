@@ -7,7 +7,10 @@ favicon = Image.open("Logo/tf.png")  # or "favicon.ico"
 st.set_page_config(
     page_title="T&F Odds Dashboard",
     page_icon=favicon,
+    layout="wide"
 )
+
+st.sidebar.markdown("Use this to toggle between pages.")
 
 df = pd.read_csv("final_results_naveen.csv")
 
@@ -23,7 +26,7 @@ custom_event_order = [
 ]
 
 # Sidebar or main page filters
-st.title("Track and Field Odds Dashboard")
+st.markdown(f"<h1 style='text-align: center;'>Track and Field Odds Dashboard</h1>", unsafe_allow_html=True)
 
 full_results = pd.read_csv("test_track_meet_results.csv")
 
@@ -128,18 +131,19 @@ filtered_meet_set = set(df['MeetName'].dropna().unique())
 event_options = [e for e in custom_event_order if e in filtered_event_set]
 meet_options = sorted(filtered_meet_set)
 
-# --- User selects Meet first ---
-selected_meet = st.selectbox("Select a Meet", meet_options)
+with st.container():
+    st.markdown(f"<h4 style='text-align: center;'>Select a Meet and Event</h4>", unsafe_allow_html=True)
+    col1, col2 = st.columns([1, 1])
 
-# --- Dynamically filter events based on selected meet ---
-meet_filtered_df = df[df['MeetName'] == selected_meet]
+    with col1:
+        selected_meet = st.selectbox("🏟️ Meet", meet_options)
 
-# Only keep custom events that exist in the filtered data
-event_set_for_meet = set(meet_filtered_df['Event'].dropna().unique())
-event_options = [e for e in custom_event_order if e in event_set_for_meet]
+    meet_filtered_df = df[df['MeetName'] == selected_meet]
+    event_set_for_meet = set(meet_filtered_df['Event'].dropna().unique())
+    event_options = [e for e in custom_event_order if e in event_set_for_meet]
 
-# --- Event selection ---
-selected_event = st.selectbox("Select an Event", event_options)
+    with col2:
+        selected_event = st.selectbox("🏁 Event", event_options)
 
 # --- Filter the DataFrame ---
 # Filter for meet + event
@@ -168,37 +172,62 @@ filtered_df.rename(columns={
 filtered_df['Place'] = filtered_df['Place'].astype(str).str.replace('.', '', regex=False)
 filtered_df['Place'] = pd.to_numeric(filtered_df['Place'], errors='coerce').astype('Int64')
 
+filtered_df = filtered_df[filtered_df['Place'].notna()]
+
 filtered_df = filtered_df.set_index("Place").sort_index()
 
-filtered_df['Predicted Place'] = filtered_df['Predicted Time'].rank(method='min').astype('Int64')
+filtered_df['Pred. Place (Time)'] = filtered_df['Predicted Time'].rank(method='min').astype('Int64')
+filtered_df['Pred. Place (Worth)'] = filtered_df['Worth'].rank(method='min', ascending=False).astype('Int64')
 
-filtered_df['Diff'] = (filtered_df['Predicted Place'] - filtered_df.index).abs()
-    
+filtered_df['Diff_Time'] = (filtered_df['Pred. Place (Time)'] - filtered_df.index).abs()
+filtered_df['Diff_Worth'] = (filtered_df['Pred. Place (Worth)'] - filtered_df.index).abs()
+
+#del filtered_df['Predicted Time'], filtered_df['Worth']
 
 # --- Show Results ---
-st.subheader(f"Results for {selected_meet} - {selected_event}")
-display_df = filtered_df.drop(columns=['Diff'])
+st.markdown(f"<h3 style='text-align: center;'>{selected_meet} - {selected_event} Results</h3>", unsafe_allow_html=True)
 
-# Use the original filtered_df (with 'Diff') in the styling logic
-def highlight_row_trimmed(row):
-    full_row = filtered_df.loc[row.name]  # get original row with 'Diff'
-    if pd.isna(full_row['Diff']):
-        return [''] * display_df.shape[1]
-    if full_row['Diff'] <= 1:
-        return ['background-color: lightgreen'] * display_df.shape[1]
-    elif full_row['Diff'] <= 3:
-        return ['background-color: khaki'] * display_df.shape[1]
-    else:
-        return ['background-color: lightcoral'] * display_df.shape[1]
+# Highlighting logic
+def highlight_better_prediction(row):
+    styles = [''] * len(display_cols)
+    try:
+        diff_time = filtered_df.loc[row.name, 'Diff_Time']
+        diff_worth = filtered_df.loc[row.name, 'Diff_Worth']
+
+        time_col = display_cols.index('Pred. Place (Time)')
+        worth_col = display_cols.index('Pred. Place (Worth)')
+
+        if pd.isna(diff_time) or pd.isna(diff_worth):
+            return styles
+
+        if diff_time < diff_worth:
+            styles[time_col] = 'background-color: lightgreen'
+            styles[worth_col] = 'background-color: lightcoral'
+        elif diff_time > diff_worth:
+            styles[time_col] = 'background-color: lightcoral'
+            styles[worth_col] = 'background-color: lightgreen'
+        else:
+            styles[time_col] = 'background-color: khaki'
+            styles[worth_col] = 'background-color: khaki'
+    except:
+        pass
+    return styles
 
 # Apply formatting
-styled_df = display_df.style\
-    .apply(highlight_row_trimmed, axis=1)\
+display_cols = [
+    'Athlete Name', 'Pre-Race Odds', 'Actual Time',
+    'Predicted Time', 'Worth',
+    'Pred. Place (Time)', 'Pred. Place (Worth)'
+]
+
+# Apply formatting
+styled_df = filtered_df[display_cols].style\
+    .apply(highlight_better_prediction, axis=1)\
     .format({
         'Pre-Race Odds': '{:.0f}',
         'Actual Time': '{:.2f}',
+        'Worth': '{:.3f}',
         'Predicted Time': '{:.2f}'
     })
-
 
 st.dataframe(styled_df, use_container_width=True)
