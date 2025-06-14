@@ -89,10 +89,13 @@ df['Meet_Date'] = pd.to_datetime(df['Meet_Date'], errors='coerce').dt.date
 full_results['Meet_Date'] = pd.to_datetime(full_results['Meet_Date'], errors='coerce').dt.date
 
 will_df = pd.read_parquet("plackettLuceScores.parquet", engine="pyarrow")
+del will_df['Athlete']
+
+will_df.drop_duplicates(subset=['Event', 'Date', 'Name'], inplace=True)
 
 will_df['Date'] = pd.to_datetime(will_df['Date'], errors='coerce').dt.date
 
-will_df = will_df.rename(columns={'Date': 'Meet_Date', 'Athlete': 'AthleteURL'})
+will_df = will_df.rename(columns={'Date': 'Meet_Date'})
 
 will_df['Event'] = will_df['Sex'] + ' ' + will_df['Event']
 
@@ -105,7 +108,7 @@ df = df.loc[df['Meet_Date'] >= pd.to_datetime('2024-12-01').date()].reset_index(
 df = pd.merge(
     df,
     will_df,
-    on=['Event', 'Meet_Date', 'AthleteURL'],
+    on=['Event', 'Meet_Date', 'Name'],
     how='outer'
 )
 
@@ -136,14 +139,14 @@ with st.container():
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        selected_meet = st.selectbox("🏟️ Meet", meet_options)
+        selected_meet = st.selectbox("Meet", meet_options)
 
     meet_filtered_df = df[df['MeetName'] == selected_meet]
     event_set_for_meet = set(meet_filtered_df['Event'].dropna().unique())
     event_options = [e for e in custom_event_order if e in event_set_for_meet]
 
     with col2:
-        selected_event = st.selectbox("🏁 Event", event_options)
+        selected_event = st.selectbox("Event", event_options)
 
 # --- Filter the DataFrame ---
 # Filter for meet + event
@@ -152,6 +155,8 @@ sub_df = df[(df['MeetName'] == selected_meet) & (df['Event'] == selected_event)]
 # --- Identify unique races ---
 # Assuming 'Final' column identifies races like 'Heat 1', 'Final', 'Prelims', etc.
 race_options = sub_df['Final'].dropna().unique()
+
+sub_df.dropna(subset=['Target_Mark'], inplace=True)
 
 # If multiple races exist, let the user choose
 if len(race_options) > 1:
@@ -168,6 +173,13 @@ filtered_df.rename(columns={
     'American Odds': 'Pre-Race Odds',
     'Target_Mark': 'Actual Time',
     'Predicted_Mark': 'Predicted Time'}, inplace=True)
+
+filtered_df['Pre-Race Odds'] = pd.to_numeric(filtered_df['Pre-Race Odds'], errors='coerce')
+
+# Format as a string with "+" for positive odds
+filtered_df['Pre-Race Odds'] = filtered_df['Pre-Race Odds'].apply(
+    lambda x: f"+{int(x)}" if pd.notnull(x) and x >= 0 else f"{int(x)}" if pd.notnull(x) else ""
+).astype(str)
 
 filtered_df['Place'] = filtered_df['Place'].astype(str).str.replace('.', '', regex=False)
 filtered_df['Place'] = pd.to_numeric(filtered_df['Place'], errors='coerce').astype('Int64')
@@ -187,6 +199,16 @@ filtered_df['Diff_Worth'] = (filtered_df['Pred. Place (Worth)'] - filtered_df.in
 # --- Show Results ---
 st.markdown(f"<h3 style='text-align: center;'>{selected_meet} - {selected_event} Results</h3>", unsafe_allow_html=True)
 
+st.markdown("""
+<div style='text-align: center; font-size: 16px; line-height: 1.6;'>
+  <div style="background-color: lightgreen; display: inline-block; padding: 4px 10px; margin: 4px; border-radius: 5px;">Exact Place Match</div>
+  <div style="background-color: khaki; display: inline-block; padding: 4px 10px; margin: 4px; border-radius: 5px;">Within +/- 2 Places</div>
+  <div style="background-color: lightcoral; display: inline-block; padding: 4px 10px; margin: 4px; border-radius: 5px;">Over 2 Places Off</div>
+</div>        
+<br>
+""", unsafe_allow_html=True)
+
+
 # Highlighting logic
 def highlight_better_prediction(row):
     styles = [''] * len(display_cols)
@@ -200,15 +222,19 @@ def highlight_better_prediction(row):
         if pd.isna(diff_time) or pd.isna(diff_worth):
             return styles
 
-        if diff_time < diff_worth:
+        if diff_time == 0:
             styles[time_col] = 'background-color: lightgreen'
-            styles[worth_col] = 'background-color: lightcoral'
-        elif diff_time > diff_worth:
-            styles[time_col] = 'background-color: lightcoral'
-            styles[worth_col] = 'background-color: lightgreen'
-        else:
+        elif diff_time <= 2:
             styles[time_col] = 'background-color: khaki'
+        else:
+            styles[time_col] = 'background-color: lightcoral'
+
+        if diff_worth == 0:
+            styles[worth_col] = 'background-color: lightgreen'
+        elif diff_worth <= 2:
             styles[worth_col] = 'background-color: khaki'
+        else:
+            styles[worth_col] = 'background-color: lightcoral'
     except:
         pass
     return styles
@@ -224,7 +250,6 @@ display_cols = [
 styled_df = filtered_df[display_cols].style\
     .apply(highlight_better_prediction, axis=1)\
     .format({
-        'Pre-Race Odds': '{:.0f}',
         'Actual Time': '{:.2f}',
         'Worth': '{:.3f}',
         'Predicted Time': '{:.2f}'
