@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 from PIL import Image
 import re
+import plotly.graph_objs as go
 
 favicon = Image.open("Logo/tf.png")  # or "favicon.ico"
 st.set_page_config(
@@ -156,7 +157,8 @@ sub_df = df[(df['MeetName'] == selected_meet) & (df['Event'] == selected_event)]
 # Assuming 'Final' column identifies races like 'Heat 1', 'Final', 'Prelims', etc.
 race_options = sub_df['Final'].dropna().unique()
 
-sub_df.dropna(subset=['Target_Mark'], inplace=True)
+# IF I don't drop this then we get an error
+#sub_df.dropna(subset=['Target_Mark'], inplace=True)
 
 # If multiple races exist, let the user choose
 if len(race_options) > 1:
@@ -185,6 +187,8 @@ filtered_df['Place'] = filtered_df['Place'].astype(str).str.replace('.', '', reg
 filtered_df['Place'] = pd.to_numeric(filtered_df['Place'], errors='coerce').astype('Int64')
 
 filtered_df = filtered_df[filtered_df['Place'].notna()]
+
+scatter_df = filtered_df.copy()
 
 filtered_df = filtered_df.set_index("Place").sort_index()
 
@@ -255,4 +259,127 @@ styled_df = filtered_df[display_cols].style\
         'Predicted Time': '{:.2f}'
     })
 
+
 st.dataframe(styled_df, use_container_width=True)
+
+st.markdown(""" <br><br> """, unsafe_allow_html=True)
+
+scatter_df['Actual Time'] = pd.to_numeric(scatter_df['Actual Time'], errors='coerce')
+scatter_df['Predicted Time'] = pd.to_numeric(scatter_df['Predicted Time'], errors='coerce')
+scatter_df = scatter_df.dropna(subset=['Actual Time', 'Predicted Time'])
+
+avg_actual = scatter_df['Actual Time'].mean()
+avg_pred = scatter_df['Predicted Time'].mean()
+
+def format_time(seconds):
+    m = int(seconds // 60)
+    s = seconds % 60
+    return f"{m}:{s:05.2f}"
+
+if not any(sprint in selected_event for sprint in ['400', '200', '100']):
+    # Create formatted columns for tooltips
+    scatter_df['Actual (m:s)'] = scatter_df['Actual Time'].apply(format_time)
+    scatter_df['Predicted (m:s)'] = scatter_df['Predicted Time'].apply(format_time)
+
+    # Generate tick labels for both axes
+    def generate_ticks(values, event_name):
+        min_val = values.min()
+        max_val = values.max()
+        if any(s in event_name.lower() for s in ['800', '1500']):
+            step = 1  # Short sprints: 1-second ticks
+        elif any(s in event_name.lower() for s in ['3000', '5000']):
+            step = 5  # Mid-distance: 5-second ticks
+        else:
+            step = 10  # Long-distance or default
+        ticks = list(range(int(min_val) - step, int(max_val) + step, step))
+        tick_labels = [format_time(t) for t in ticks]
+        return ticks, tick_labels
+
+    x_ticks, x_labels = generate_ticks(scatter_df['Predicted Time'], selected_event)
+    y_ticks, y_labels = generate_ticks(scatter_df['Actual Time'], selected_event)
+
+    # Format average lines
+    avg_actual_label = format_time(avg_actual)
+    avg_pred_label = format_time(avg_pred)
+else:
+    scatter_df['Actual (m:s)'] = scatter_df['Actual Time'].round(2)
+    scatter_df['Predicted (m:s)'] = scatter_df['Predicted Time'].round(2)
+
+    # Use default raw seconds for ticks and labels
+    x_ticks, x_labels = None, None
+    y_ticks, y_labels = None, None
+    avg_actual_label = f"{avg_actual:.2f}"
+    avg_pred_label = f"{avg_pred:.2f}"
+
+scatter_df['Color'] = scatter_df.apply(
+    lambda row: 'green' if row['Actual Time'] < row['Predicted Time'] else 'red',
+    axis=1
+)
+
+# Plot
+fig = go.Figure()
+
+# Add scatter points
+fig.add_trace(go.Scatter(
+    x=scatter_df['Predicted Time'],
+    y=scatter_df['Actual Time'],
+    mode='markers',
+    marker=dict(size=10, color=scatter_df['Color']),
+    customdata=scatter_df[['Athlete Name', 'Predicted (m:s)', 'Actual (m:s)']],
+    hovertemplate="<b>%{customdata[0]}</b><br>Predicted: %{customdata[1]}<br>Actual: %{customdata[2]}<extra></extra>",
+    name='Athletes'
+))
+
+# Add vertical average line (Predicted)
+fig.add_shape(
+    type="line", x0=avg_pred, x1=avg_pred,
+    y0=scatter_df['Actual Time'].min(), y1=scatter_df['Actual Time'].max(),
+    line=dict(color="gray", dash="dash")
+)
+
+# Add horizontal average line (Actual)
+fig.add_shape(
+    type="line", x0=scatter_df['Predicted Time'].min(), x1=scatter_df['Predicted Time'].max(),
+    y0=avg_actual, y1=avg_actual,
+    line=dict(color="gray", dash="dash")
+)
+
+# Add annotations for averages
+fig.add_annotation(
+    x=avg_pred, y=scatter_df['Actual Time'].max(),
+    text=f"Avg Pred: {avg_pred_label}",
+    showarrow=False, yanchor='bottom', xanchor='left', font=dict(size=10)
+)
+fig.add_annotation(
+    x=scatter_df['Predicted Time'].max(), y=avg_actual,
+    text=f"Avg Act: {avg_actual_label}",
+    showarrow=False, yanchor='bottom', xanchor='right', font=dict(size=10)
+)
+
+# Axis formatting
+fig.update_layout(
+    title=dict(
+        text=f'Predicted vs Actual Times for {selected_event} at {selected_meet}',
+        x=0.5,
+        xanchor='center',
+        font=dict(size=16)
+    ),
+    height=400,
+    width=400,
+    margin=dict(l=20, r=20, t=40, b=30),
+    xaxis=dict(
+        title=f'Predicted Time for {selected_event}',
+        tickvals=x_ticks if x_ticks else None,
+        ticktext=x_labels if x_labels else None,
+        showline=True
+    ),
+    yaxis=dict(
+        title=f'Actual Time for {selected_event}',
+        tickvals=y_ticks if y_ticks else None,
+        ticktext=y_labels if y_labels else None,
+        showline=True
+    ),
+    showlegend=False
+)
+
+st.plotly_chart(fig, use_container_width=True)
