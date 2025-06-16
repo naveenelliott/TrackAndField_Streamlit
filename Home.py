@@ -132,22 +132,31 @@ df = df.merge(valid_combinations[['MeetName', 'Event', 'Final']],
 filtered_event_set = set(df['Event'].dropna().unique())
 filtered_meet_set = set(df['MeetName'].dropna().unique())
 
+meet_options = ["Select a Meet"] + sorted(filtered_meet_set)
+
 event_options = [e for e in custom_event_order if e in filtered_event_set]
-meet_options = sorted(filtered_meet_set)
 
 with st.container():
     st.markdown(f"<h4 style='text-align: center;'>Select a Meet and Event</h4>", unsafe_allow_html=True)
     col1, col2 = st.columns([1, 1])
 
     with col1:
-        selected_meet = st.selectbox("Meet", meet_options)
+        selected_meet = st.selectbox("", meet_options, index=0)
+    if selected_meet == "Select a Meet":
+        st.warning("Please select a meet to proceed.")
+        st.stop()
 
+    # Filter events based on selected meet
     meet_filtered_df = df[df['MeetName'] == selected_meet]
     event_set_for_meet = set(meet_filtered_df['Event'].dropna().unique())
-    event_options = [e for e in custom_event_order if e in event_set_for_meet]
+    event_options = ["Select an Event"] + [e for e in custom_event_order if e in event_set_for_meet]
 
     with col2:
-        selected_event = st.selectbox("Event", event_options)
+        selected_event = st.selectbox("", event_options, index=0)
+    
+    if selected_event == "Select an Event":
+        st.warning("Please select an event to proceed.")
+        st.stop()
 
 # --- Filter the DataFrame ---
 # Filter for meet + event
@@ -216,16 +225,13 @@ st.markdown("""
 # Highlighting logic
 def highlight_better_prediction(row):
     styles = [''] * len(display_cols)
-    try:
-        diff_time = filtered_df.loc[row.name, 'Diff_Time']
-        diff_worth = filtered_df.loc[row.name, 'Diff_Worth']
 
-        time_col = display_cols.index('Pred. Place (Time)')
-        worth_col = display_cols.index('Pred. Place (Worth)')
+    time_col = display_cols.index('Pred. Place (Time)')
+    worth_col = display_cols.index('Pred. Place (Worth)')
 
-        if pd.isna(diff_time) or pd.isna(diff_worth):
-            return styles
-
+    # Handle Time highlighting
+    diff_time = filtered_df.loc[row.name, 'Diff_Time']
+    if pd.notna(diff_time):
         if diff_time == 0:
             styles[time_col] = 'background-color: lightgreen'
         elif diff_time <= 2:
@@ -233,14 +239,16 @@ def highlight_better_prediction(row):
         else:
             styles[time_col] = 'background-color: lightcoral'
 
+    # Handle Worth highlighting (only if value exists)
+    diff_worth = filtered_df.loc[row.name, 'Diff_Worth']
+    if pd.notna(diff_worth):
         if diff_worth == 0:
             styles[worth_col] = 'background-color: lightgreen'
         elif diff_worth <= 2:
             styles[worth_col] = 'background-color: khaki'
         else:
             styles[worth_col] = 'background-color: lightcoral'
-    except:
-        pass
+
     return styles
 
 # Apply formatting
