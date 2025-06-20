@@ -80,7 +80,9 @@ full_results2 = pd.read_csv('preProcessed_betting.csv')
 
 full_results = pd.concat([full_results, full_results2], ignore_index=True)
 
-full_results = full_results[['MeetName', 'Event', 'Date', 'Final', 'Name', 'Place', 'AthleteURL']]
+full_results = full_results[['MeetName', 'Event', 'Date', 'Final', 'Name', 'Place', 'AthleteURL', 'Mark']]
+
+full_results.rename(columns={'Mark': 'Actual Time'}, inplace=True)
 
 full_results['Final'] = full_results['Final'].fillna('Idk')
 
@@ -102,14 +104,20 @@ will_df['Event'] = will_df['Sex'] + ' ' + will_df['Event']
 
 del will_df['Sex']
 
+will_df.dropna(subset=['MeetName'], inplace=True)
+
 df = pd.merge(df, full_results, on=['MeetName', 'Event', 'Final', 'Meet_Date', 'Name'], how='outer')
 
 df = df.loc[df['Meet_Date'] >= pd.to_datetime('2024-12-01').date()].reset_index(drop=True)
 
+df['Meet_Year'] = pd.to_datetime(df['Meet_Date'], errors='coerce').dt.year
+
+will_df['Meet_Year'] = pd.to_datetime(will_df['Meet_Date'], errors='coerce').dt.year
+
 df = pd.merge(
     df,
     will_df,
-    on=['Event', 'Meet_Date', 'Name'],
+    on=['Event', 'Meet_Year', 'Name', 'MeetName'],
     how='outer'
 )
 
@@ -129,8 +137,21 @@ valid_combinations = odds_counts[odds_counts['odds_count'] >= 5]
 df = df.merge(valid_combinations[['MeetName', 'Event', 'Final']], 
                         on=['MeetName', 'Event', 'Final'], how='inner')
 
-filtered_event_set = set(df['Event'].dropna().unique())
-filtered_meet_set = set(df['MeetName'].dropna().unique())
+event_counts = df.groupby('MeetName')['Event'].nunique().reset_index()
+event_counts = event_counts.rename(columns={'Event': 'num_events'})
+
+# Keep only meets with more than 3 events
+valid_meets = event_counts[event_counts['num_events'] > 3]
+
+# Filter the main df to include only those meets
+df = df.merge(valid_meets[['MeetName']], on='MeetName', how='inner')
+
+# ⛔ Remove rows with missing 'Place'
+place_filtered_df = df[df['Place'].notna()]
+
+# ✅ Build valid sets only from data with known 'Place'
+filtered_event_set = set(place_filtered_df['Event'].dropna().unique())
+filtered_meet_set = set(place_filtered_df['MeetName'].dropna().unique())
 
 meet_options = ["Select a Meet"] + sorted(filtered_meet_set)
 
@@ -147,7 +168,7 @@ with st.container():
         st.stop()
 
     # Filter events based on selected meet
-    meet_filtered_df = df[df['MeetName'] == selected_meet]
+    meet_filtered_df = place_filtered_df[place_filtered_df['MeetName'] == selected_meet]
     event_set_for_meet = set(meet_filtered_df['Event'].dropna().unique())
     event_options = ["Select an Event"] + [e for e in custom_event_order if e in event_set_for_meet]
 
@@ -177,12 +198,23 @@ else:
     filtered_df = sub_df
 
 
-filtered_df = filtered_df[['Place', 'Name', 'American Odds', 'Target_Mark', 'Predicted_Mark', 'Worth']]
+filtered_df = filtered_df[['Place', 'Name', 'American Odds', 'Actual Time', 'Predicted_Mark', 'Worth']]
+
+def smart_time_to_seconds(value):
+    try:
+        if isinstance(value, str) and ':' in value:
+            minutes, seconds = map(float, value.split(':'))
+            return minutes * 60 + seconds
+        else:
+            return float(value)
+    except:
+        return pd.NA
+    
+filtered_df['Actual Time'] = filtered_df['Actual Time'].apply(smart_time_to_seconds)
 
 filtered_df.rename(columns={
     'Name': 'Athlete Name',
     'American Odds': 'Pre-Race Odds',
-    'Target_Mark': 'Actual Time',
     'Predicted_Mark': 'Predicted Time'}, inplace=True)
 
 filtered_df['Pre-Race Odds'] = pd.to_numeric(filtered_df['Pre-Race Odds'], errors='coerce')
