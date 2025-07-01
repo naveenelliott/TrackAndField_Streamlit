@@ -26,14 +26,18 @@ st.markdown("<div class='about-title'>About This Dashboard</div>", unsafe_allow_
 
 st.markdown("""
 <div class='about-text'>
-This Track & Field Odds Dashboard helps visualize and analyze pre-race betting odds, predicted race times, and performance metrics 
-for major athletics competitions. Built using Python, Streamlit, and Pandas, this tool integrates data from multiple sources, including 
-pre-processed betting lines and post-race results.
+This Track & Field Odds Dashboard helps visualize pre-race betting odds and predicted race times for major athletics competitions. 
+Built using Python, Streamlit, and R, this tool integrates data from World Athletics to analyze athletics results.
 
 <br>
 <br>
-The goal is to provide both predictive insight and retrospective evaluation of athlete performance, ranking models using both 
-predicted time and value-based metrics such as "worth". Features include sortable tables, highlight comparisons, and race-specific filters.
+The goal is to provide both predictive insight and retrospective evaluation of athlete performance, using both predicted time and value-based metrics such as "worth". 
+In a sport built upon numbers, we believed there was a lack of predictive analytics. Our hope is that the insights shown in this dashboard increase the accessibility of the sport. 
+
+<br>
+<br>
+            
+Since this is our first iteration, we are open to feedback on how to improve this dashboard in the future.
 
 <br><br>
 🛠️ Built by: <strong>Naveen Elliott and Will Sorg</strong>  
